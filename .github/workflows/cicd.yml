@@ -1,0 +1,64 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  Test:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4 
+
+    - name: Node.js setup
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Run tests
+      env:
+        FORCE_COLOR: 1
+      run: |
+        npm run check > test-results.log 
+        cat test-results.log
+
+    - name: Upload test results 
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results
+        path: test-results.log
+
+  Deploy:
+      runs-on: self-hosted 
+      needs: Test
+      steps: 
+      - name: Download test results artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: test-results
+
+      - name: Move and Print test results locally on EC2
+        run: |
+          mkdir -p /home/ubuntu/app-logs
+          cp test-results.log /home/ubuntu/app-logs/test-results.log
+          echo "==== PRINTING TEST LOGS INSIDE EC2 ===="
+          cat /home/ubuntu/app-logs/test-results.log
+          echo "======================================="
+
+      - name: Deploy Application Updates
+        run: |
+          cd /home/ubuntu/app
+          git pull origin main
+          npm install
+          pm2 restart "APP:3000" || pm2 start npm --name "APP:3000" -- start
+          pm2 save
+          sudo systemctl restart nginx
